@@ -1,0 +1,584 @@
+/**
+  ******************************************************************************
+  * @file          : app_tof.c
+  * @author        : IMG SW Application Team
+  * @brief         : This file provides code for the configuration
+  *                  of the STMicroelectronics.X-CUBE-TOF1.3.4.3 instances.
+  ******************************************************************************
+  *
+  * @attention
+  *
+  * Copyright (c) 2023 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Includes ------------------------------------------------------------------*/
+#include "app_tof.h"
+#include "main.h"
+#include <stdio.h>
+#include "log.h"
+#include "custom_ranging_sensor.h"
+
+/* Private typedef -----------------------------------------------------------*/
+
+/* Private define ------------------------------------------------------------*/
+/* uncomment following to use directly the bare driver instead of the BSP */
+/* #define USE_BARE_DRIVER */
+#define TIMING_BUDGET (30U) /* 5 ms < TimingBudget < 100 ms */
+#define RANGING_FREQUENCY (10U) /* Ranging frequency Hz (shall be consistent with TimingBudget value) */
+#define POLLING_PERIOD (1)
+
+/* Private variables ---------------------------------------------------------*/
+#ifndef USE_BARE_DRIVER
+static RANGING_SENSOR_Capabilities_t Cap;
+#endif
+static RANGING_SENSOR_ProfileConfig_t Profile;
+static RANGING_SENSOR_Result_t Result;
+
+static int32_t status = 0;
+volatile uint8_t ToF_EventDetected = 0;
+float ToF_Distance = 0;
+
+/* Private function prototypes -----------------------------------------------*/
+#ifdef USE_BARE_DRIVER
+static uint8_t map_target_status(uint8_t status);
+static int32_t convert_data_format(VL53L5CX_Object_t *pObj,
+                                   VL53L5CX_ResultsData *data, RANGING_SENSOR_Result_t *pResult);
+#endif
+static bool MX_VL53L5CX_SimpleRanging_Init(void);
+static bool MX_VL53L5CX_SimpleRanging_Process(void);
+//static void print_result(RANGING_SENSOR_Result_t *Result);
+//static void toggle_resolution(void);
+//static void toggle_signal_and_ambient(void);
+//static void clear_screen(void);
+//static void display_commands_banner(void);
+//static void handle_cmd(uint8_t cmd);
+
+
+bool MX_TOF_Init(void)
+{
+  /* USER CODE BEGIN SV */
+
+  /* USER CODE END SV */
+
+  /* USER CODE BEGIN TOF_Init_PreTreatment */
+
+  /* USER CODE END TOF_Init_PreTreatment */
+
+  /* Initialize the peripherals and the TOF components */
+
+  return MX_VL53L5CX_SimpleRanging_Init();
+
+  /* USER CODE BEGIN TOF_Init_PostTreatment */
+
+  /* USER CODE END TOF_Init_PostTreatment */
+}
+
+/*
+ * LM background task
+ */
+bool MX_TOF_Process(void)
+{
+  /* USER CODE BEGIN TOF_Process_PreTreatment */
+
+  /* USER CODE END TOF_Process_PreTreatment */
+
+  return MX_VL53L5CX_SimpleRanging_Process();
+
+  /* USER CODE BEGIN TOF_Process_PostTreatment */
+
+  /* USER CODE END TOF_Process_PostTreatment */
+}
+
+static bool MX_VL53L5CX_SimpleRanging_Init(void)
+{
+	LogI("\033[2H\033[2J");
+	LogI("Sensor initialization...\n");
+
+  status = CUSTOM_RANGING_SENSOR_Init(CUSTOM_VL53L5CX);
+
+  if (status != BSP_ERROR_NONE)
+  {
+    LogE("CUSTOM_RANGING_SENSOR_Init failed\n");
+    return false;
+  }
+
+  uint32_t Id;
+
+  CUSTOM_RANGING_SENSOR_ReadID(CUSTOM_VL53L5CX, &Id);
+  CUSTOM_RANGING_SENSOR_GetCapabilities(CUSTOM_VL53L5CX, &Cap);
+
+  Profile.RangingProfile = RS_PROFILE_4x4_CONTINUOUS;
+  Profile.TimingBudget = TIMING_BUDGET;
+  Profile.Frequency = RANGING_FREQUENCY; /* Ranging frequency Hz (shall be consistent with TimingBudget value) */
+  Profile.EnableAmbient = 1; /* Enable: 1, Disable: 0 */
+  Profile.EnableSignal = 1; /* Enable: 1, Disable: 0 */
+
+  /* set the profile if different from default one */
+  CUSTOM_RANGING_SENSOR_ConfigProfile(CUSTOM_VL53L5CX, &Profile);
+
+  status = CUSTOM_RANGING_SENSOR_Start(CUSTOM_VL53L5CX, RS_MODE_ASYNC_CONTINUOUS);
+
+  if (status != BSP_ERROR_NONE)
+  {
+    LogE("CUSTOM_RANGING_SENSOR_Start failed\n");
+    return false;
+  }
+  return true;
+}
+
+#ifdef USE_BARE_DRIVER
+static void MX_VL53L5CX_SimpleRanging_Process(void)
+{
+  VL53L5CX_Object_t *pL5obj = CUSTOM_RANGING_CompObj[CUSTOM_VL53L5CX];
+  static VL53L5CX_ResultsData data;
+
+  Profile.RangingProfile = RS_PROFILE_4x4_CONTINUOUS;
+  Profile.TimingBudget = TIMING_BUDGET;
+  Profile.Frequency = RANGING_FREQUENCY; /* Ranging frequency Hz (shall be consistent with TimingBudget value) */
+  Profile.EnableAmbient = 0; /* Enable: 1, Disable: 0 */
+  Profile.EnableSignal = 0; /* Enable: 1, Disable: 0 */
+
+  pL5obj->IsAmbientEnabled = Profile.EnableAmbient;
+  pL5obj->IsSignalEnabled = Profile.EnableSignal;
+
+  /*
+     use case VL53L5CX_PROFILE_4x4_CONTINUOUS:
+  */
+  status = vl53l5cx_set_resolution(&(pL5obj->Dev), VL53L5CX_RESOLUTION_4X4);
+  status |= vl53l5cx_set_ranging_mode(&(pL5obj->Dev), VL53L5CX_RANGING_MODE_CONTINUOUS);
+  status |= vl53l5cx_set_integration_time_ms(&(pL5obj->Dev), TIMING_BUDGET);
+  status |= vl53l5cx_set_ranging_frequency_hz(&(pL5obj->Dev), RANGING_FREQUENCY);
+
+  if (status != VL53L5CX_STATUS_OK)
+  {
+    printf("ERROR : Configuration programming error!\n\n");
+    while (1);
+  }
+
+  status = vl53l5cx_start_ranging(&(pL5obj->Dev));
+  if (status != VL53L5CX_STATUS_OK)
+  {
+    printf("vl53l5cx_start_ranging failed\n");
+    while (1);
+  }
+
+  while (1)
+  {
+    /* interrupt mode */
+    if (ToF_EventDetected != 0)
+    {
+      ToF_EventDetected = 0;
+
+      status = vl53l5cx_get_ranging_data(&(pL5obj->Dev), &data);
+
+      if (status == VL53L5CX_STATUS_OK)
+      {
+        /*
+         Convert the data format to Result format.
+         Note that you can print directly from data format
+        */
+        if (convert_data_format(pL5obj, &data, &Result) < 0)
+        {
+          printf("convert_data_format failed\n");
+          while (1);
+        }
+        print_result(&Result);
+      }
+    }
+
+    if (com_has_data())
+    {
+      handle_cmd(get_key());
+    }
+  }
+}
+#else
+static bool MX_VL53L5CX_SimpleRanging_Process(void)
+{
+    /* interrupt mode */
+    //if (ToF_EventDetected != 0)
+    {
+      ToF_EventDetected = 0;
+
+      status = CUSTOM_RANGING_SENSOR_GetDistance(CUSTOM_VL53L5CX, &Result);
+
+      if (status == BSP_ERROR_NONE)
+      {
+			//print_result(&Result);
+			//计算最远距离
+			int8_t j;
+			int8_t k;
+			int8_t l;
+			int32_t distance = 0;
+			uint8_t zones_per_line;
+			zones_per_line = ((Profile.RangingProfile == RS_PROFILE_8x8_AUTONOMOUS) ||
+							(Profile.RangingProfile == RS_PROFILE_8x8_CONTINUOUS)) ? 8 : 4;
+
+			float total = 0;
+			int count = 0;
+			int near_count = 0; //小于30cm的点数
+			int far_count = 0;  //大于30cm的点数
+			uint32_t values[16];
+			memset(values, 0, sizeof(values));
+			int ivalue = 0;
+			for (j = 0; j < Result.NumberOfZones; j += zones_per_line)
+			{
+				for (l = 0; l < RANGING_SENSOR_NB_TARGET_PER_ZONE; l++)
+				{
+				  /* Print distance and status */
+				  for (k = (zones_per_line - 1); k >= 0; k--)
+				  {
+					if (Result.ZoneResult[j + k].NumberOfTargets > 0)
+					{
+						if (Result.ZoneResult[j + k].Status[l] == 0)
+						{
+							uint32_t value = Result.ZoneResult[j + k].Distance[l];
+							values[ivalue] = value;
+							ivalue++;
+							total += value;
+							count++;
+							if (value < 300)
+							{
+								near_count++;
+							}
+							else
+							{
+								far_count++;
+							}
+						}
+					}
+				  }
+				}
+			}
+#if 0
+			static uint32_t prev_tick = 0;
+			uint32_t tick = HAL_GetTick();
+			if ((tick - prev_tick) > 1000)
+			{
+				prev_tick = tick;
+				LogI("near:%d, far:%d", near_count, far_count);
+			}
+#endif
+			//消除小于30cm的值
+			if (far_count > 0 && near_count > 0)
+			{
+				for (int i=0; i<16; i++)
+				{
+					if (values[i] < 300)
+					{
+						if (total > values[i] && count > 0)
+						{
+							total -= values[i];
+							count--;
+						}
+					}
+				}
+			}
+			if (count == 0)
+			{
+				return false;
+			}
+			distance = total / count;
+			if (distance == 0)
+			{
+			  return false;
+			}
+
+			ToF_Distance = distance / 1000.0f;
+
+			return true;
+      }
+    }
+    return false;
+}
+#endif /* USE_BARE_DRIVER */
+
+/*
+static void print_result(RANGING_SENSOR_Result_t *Result)
+{
+  int8_t i;
+  int8_t j;
+  int8_t k;
+  int8_t l;
+  uint8_t zones_per_line;
+
+  zones_per_line = ((Profile.RangingProfile == RS_PROFILE_8x8_AUTONOMOUS) ||
+                    (Profile.RangingProfile == RS_PROFILE_8x8_CONTINUOUS)) ? 8 : 4;
+
+  display_commands_banner();
+
+  printf("Cell Format :\n\n");
+  for (l = 0; l < RANGING_SENSOR_NB_TARGET_PER_ZONE; l++)
+  {
+    printf(" \033[38;5;10m%20s\033[0m : %20s\n", "Distance [mm]", "Status");
+    if ((Profile.EnableAmbient != 0) || (Profile.EnableSignal != 0))
+    {
+      printf(" %20s : %20s\n", "Signal [kcps/spad]", "Ambient [kcps/spad]");
+    }
+  }
+
+  printf("\n\n");
+
+  for (j = 0; j < Result->NumberOfZones; j += zones_per_line)
+  {
+    for (i = 0; i < zones_per_line; i++) // number of zones per line
+    {
+      printf(" -----------------");
+    }
+    printf("\n");
+
+    for (i = 0; i < zones_per_line; i++)
+    {
+      printf("|                 ");
+    }
+    printf("|\n");
+
+    for (l = 0; l < RANGING_SENSOR_NB_TARGET_PER_ZONE; l++)
+    {
+      // Print distance and status
+      for (k = (zones_per_line - 1); k >= 0; k--)
+      {
+        if (Result->ZoneResult[j + k].NumberOfTargets > 0)
+        {
+          if ((long)Result->ZoneResult[j + k].Distance[l] < 500)
+          {
+            printf("| \033[38;5;9m%5ld\033[0m  :  %5ld ",
+                   (long)Result->ZoneResult[j + k].Distance[l],
+                   (long)Result->ZoneResult[j + k].Status[l]);
+          }
+          else
+          {
+            printf("| \033[38;5;10m%5ld\033[0m  :  %5ld ",
+                   (long)Result->ZoneResult[j + k].Distance[l],
+                   (long)Result->ZoneResult[j + k].Status[l]);
+          }
+        }
+        else
+          printf("| %5s  :  %5s ", "X", "X");
+      }
+      printf("|\n");
+
+      if ((Profile.EnableAmbient != 0) || (Profile.EnableSignal != 0))
+      {
+        // Print Signal and Ambient
+        for (k = (zones_per_line - 1); k >= 0; k--)
+        {
+          if (Result->ZoneResult[j + k].NumberOfTargets > 0)
+          {
+            if (Profile.EnableSignal != 0)
+            {
+              printf("| %5ld  :  ", (long)Result->ZoneResult[j + k].Signal[l]);
+            }
+            else
+              printf("| %5s  :  ", "X");
+
+            if (Profile.EnableAmbient != 0)
+            {
+              printf("%5ld ", (long)Result->ZoneResult[j + k].Ambient[l]);
+            }
+            else
+              printf("%5s ", "X");
+          }
+          else
+            printf("| %5s  :  %5s ", "X", "X");
+        }
+        printf("|\n");
+      }
+    }
+  }
+
+  for (i = 0; i < zones_per_line; i++)
+  {
+    printf(" -----------------");
+  }
+  printf("\n");
+}
+
+
+
+static void toggle_resolution(void)
+{
+  CUSTOM_RANGING_SENSOR_Stop(CUSTOM_VL53L5CX);
+
+  switch (Profile.RangingProfile)
+  {
+    case RS_PROFILE_4x4_AUTONOMOUS:
+      Profile.RangingProfile = RS_PROFILE_8x8_AUTONOMOUS;
+      break;
+
+    case RS_PROFILE_4x4_CONTINUOUS:
+      Profile.RangingProfile = RS_PROFILE_8x8_CONTINUOUS;
+      break;
+
+    case RS_PROFILE_8x8_AUTONOMOUS:
+      Profile.RangingProfile = RS_PROFILE_4x4_AUTONOMOUS;
+      break;
+
+    case RS_PROFILE_8x8_CONTINUOUS:
+      Profile.RangingProfile = RS_PROFILE_4x4_CONTINUOUS;
+      break;
+
+    default:
+      break;
+  }
+
+  CUSTOM_RANGING_SENSOR_ConfigProfile(CUSTOM_VL53L5CX, &Profile);
+  CUSTOM_RANGING_SENSOR_Start(CUSTOM_VL53L5CX, RS_MODE_ASYNC_CONTINUOUS);
+}
+
+static void toggle_signal_and_ambient(void)
+{
+  CUSTOM_RANGING_SENSOR_Stop(CUSTOM_VL53L5CX);
+
+  Profile.EnableAmbient = (Profile.EnableAmbient) ? 0U : 1U;
+  Profile.EnableSignal = (Profile.EnableSignal) ? 0U : 1U;
+
+  CUSTOM_RANGING_SENSOR_ConfigProfile(CUSTOM_VL53L5CX, &Profile);
+  CUSTOM_RANGING_SENSOR_Start(CUSTOM_VL53L5CX, RS_MODE_ASYNC_CONTINUOUS);
+}
+
+
+
+static void display_commands_banner(void)
+{
+  // clear screen
+  printf("%c[2H", 27);
+
+  printf("VL53L5CX Simple Ranging demo application\n");
+#ifdef USE_BARE_DRIVER
+  printf("Using direct calls to VL53L5CX bare driver API\n");
+#endif
+  printf("Interrupt driven mode\n");
+  printf("----------------------------------------\n\n");
+
+  printf("Use the following keys to control application\n");
+  printf(" 'r' : change resolution\n");
+  printf(" 's' : enable signal and ambient\n");
+  printf(" 'c' : clear screen\n");
+  printf("\n");
+}
+
+static void handle_cmd(uint8_t cmd)
+{
+  switch (cmd)
+  {
+    case 'r':
+      toggle_resolution();
+      clear_screen();
+      break;
+
+    case 's':
+      toggle_signal_and_ambient();
+      clear_screen();
+      break;
+
+    case 'c':
+      clear_screen();
+      break;
+
+    default:
+      break;
+  }
+}
+
+
+*/
+
+#ifdef USE_BARE_DRIVER
+static uint8_t map_target_status(uint8_t status)
+{
+  uint8_t ret;
+
+  if ((status == 5U) || (status == 9U))
+  {
+    ret = 0U; // ranging is OK
+  }
+  else if (status == 0U)
+  {
+    ret = 255U; // no update
+  }
+  else
+  {
+    ret = status; // return device status otherwise
+  }
+
+  return ret;
+}
+
+
+static int32_t convert_data_format(VL53L5CX_Object_t *pObj,
+                                   VL53L5CX_ResultsData *data, RANGING_SENSOR_Result_t *pResult)
+{
+  int32_t ret;
+  uint8_t i, j;
+  uint8_t resolution;
+  uint8_t target_status;
+
+  if ((pObj == NULL) || (pResult == NULL))
+  {
+    ret = VL53L5CX_INVALID_PARAM;
+  }
+  else if (vl53l5cx_get_resolution(&pObj->Dev, &resolution) != VL53L5CX_STATUS_OK)
+  {
+    ret = VL53L5CX_ERROR;
+  }
+  else
+  {
+    pResult->NumberOfZones = resolution;
+
+    for (i = 0; i < resolution; i++)
+    {
+      pResult->ZoneResult[i].NumberOfTargets = data->nb_target_detected[i];
+
+      for (j = 0; j < data->nb_target_detected[i]; j++)
+      {
+        pResult->ZoneResult[i].Distance[j] = (uint32_t)data->distance_mm[(VL53L5CX_NB_TARGET_PER_ZONE * i) + j];
+
+        /* return Ambient value if ambient rate output is enabled */
+        if (pObj->IsAmbientEnabled == 1U)
+        {
+          /* apply ambient value to all targets in a given zone */
+          pResult->ZoneResult[i].Ambient[j] = (float_t)data->ambient_per_spad[i];
+        }
+        else
+        {
+          pResult->ZoneResult[i].Ambient[j] = 0.0f;
+        }
+
+        /* return Signal value if signal rate output is enabled */
+        if (pObj->IsSignalEnabled == 1U)
+        {
+          pResult->ZoneResult[i].Signal[j] =
+            (float_t)data->signal_per_spad[(VL53L5CX_NB_TARGET_PER_ZONE * i) + j];
+        }
+        else
+        {
+          pResult->ZoneResult[i].Signal[j] = 0.0f;
+        }
+
+        target_status = data->target_status[(VL53L5CX_NB_TARGET_PER_ZONE * i) + j];
+        pResult->ZoneResult[i].Status[j] = map_target_status(target_status);
+      }
+    }
+
+    ret = VL53L5CX_OK;
+  }
+
+  return ret;
+}
+#endif
+
+#ifdef __cplusplus
+}
+#endif

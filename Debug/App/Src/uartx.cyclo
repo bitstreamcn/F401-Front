@@ -1,0 +1,2 @@
+../App/Src/uartx.cpp:23:6:void HAL_UART_TxCpltCallback(UART_HandleTypeDef*)	2
+../App/Src/uartx.cpp:36:9:uint8_t UART1_DMA_Send(uint8_t*, uint16_t)	5

@@ -1,0 +1,4 @@
+../App/Device/TOF/app_tof.c:68:6:MX_TOF_Init	1
+../App/Device/TOF/app_tof.c:90:6:MX_TOF_Process	1
+../App/Device/TOF/app_tof.c:103:13:MX_VL53L5CX_SimpleRanging_Init	3
+../App/Device/TOF/app_tof.c:207:13:MX_VL53L5CX_SimpleRanging_Process	18

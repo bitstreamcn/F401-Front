@@ -1,0 +1,10 @@
+../App/Common/ring_buffer.c:21:6:rb_init	1
+../App/Common/ring_buffer.c:29:10:rb_put	4
+../App/Common/ring_buffer.c:51:10:rb_get	4
+../App/Common/ring_buffer.c:73:10:rb_avail	1
+../App/Common/ring_buffer.c:79:10:rb_free	1
+../App/Common/ring_buffer.c:85:6:rb_is_empty	1
+../App/Common/ring_buffer.c:89:6:rb_is_full	1
+../App/Common/ring_buffer.c:94:10:rb_advance_tail	3
+../App/Common/ring_buffer.c:110:6:rb_keep_last	2
+../App/Common/ring_buffer.c:119:6:rb_clear	1
