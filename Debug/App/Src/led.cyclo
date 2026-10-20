@@ -1,2 +1,0 @@
-../App/Src/led.cpp:12:6:void Led::Error()	2
-../App/Src/led.cpp:20:6:void Led::Clear()	2
